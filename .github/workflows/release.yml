@@ -10,6 +10,7 @@ jobs:
       - uses: dawidd6/action-download-artifact@v2
         with:
           workflow: build.yml
+          search_artifacts: true
           name: wheels
       - name: Publish to PyPi
         env:
