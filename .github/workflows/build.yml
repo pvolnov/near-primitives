@@ -203,11 +203,10 @@ jobs:
 
   release_pypi:
     runs-on: ubuntu-latest
+    needs: [macos_x86_64, linux-cross, musllinux, linux, windows, macos_universal2]
     steps:
-      - uses: dawidd6/action-download-artifact@v2
+      - uses: actions/download-artifact@v3
         with:
-          workflow: build.yml
-          search_artifacts: true
           name: wheels
       - name: Publish to PyPi
         env:
