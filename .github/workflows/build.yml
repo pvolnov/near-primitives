@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 env:
-  name: pyonear
+  name: py_near_primitives
   python_version: "3.7"
   CARGO_INCREMENTAL: 0
   RUSTFLAGS: "-D warnings"

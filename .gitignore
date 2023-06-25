@@ -137,3 +137,5 @@ Cargo.lock
 /Cargo.lock
 
 test.py
+.DS_Store
+.idea
