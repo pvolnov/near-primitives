@@ -5,9 +5,15 @@
 
 # near primitives
 
-A wrapper over `near-primitives` rust lib for python. Using for [py-near](https://github.com/pvolnov/py-near).
+A wrapper over `py-near-primitives` rust lib for python. Using for [py-near](https://github.com/pvolnov/py-near).
 
-Latest supported version: `near-primitives = "0.17.0"`
+Latest supported version: `py-near-primitives = "0.17.0"`
+
+# use with python 
+
+Use the `py-near` for the high-level api over `py-near-primitives`
+
+Documentation: https://py-near.readthedocs.io/en/latest
 
 
 ## Installation
