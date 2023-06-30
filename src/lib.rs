@@ -334,7 +334,9 @@ impl DelegateAction {
         return *action.get_nep461_hash().as_bytes();
     }
 
-    fn serialize(&self) -> Vec<u8> {
+
+    #[pyo3(text_signature = "() -> bytes")]
+    fn serialize(&self) -> PyResult<Py<PyBytes>> {
         let pk = PublicKey::ED25519(ED25519PublicKey(self.public_key));
         let action = DelegateActionOriginal {
             sender_id: AccountId::from_str(self.sender_id.as_str()).unwrap(),
@@ -344,11 +346,17 @@ impl DelegateAction {
             max_block_height: self.max_block_height,
             public_key: pk,
         };
-        return action.try_to_vec().unwrap().to_vec();
+        let res = action.try_to_vec().unwrap().to_vec();
+
+        let py = unsafe { Python::assume_gil_acquired() };
+        let pybytes = PyBytes::new(py, &res);
+
+        Ok(pybytes.into())
     }
 
 
     #[staticmethod]
+    #[pyo3(signature = (bytes))]
     fn bytes_to_json(mut bytes: &[u8]) -> String {
         let bytes_mut: &mut &[u8] = &mut bytes;
         let action: DelegateActionOriginal = near_primitives::borsh::BorshDeserialize::deserialize(bytes_mut).unwrap();
