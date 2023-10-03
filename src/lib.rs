@@ -38,7 +38,6 @@ use near_crypto::{PublicKey, Signature};
 
 pub type LogEntry = String;
 
-
 #[pyclass]
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct AccessKey {
@@ -227,6 +226,105 @@ impl SignedDelegateAction {
     }
 }
 
+fn get_orig_transaction(in_tr: &Transaction) -> TransactionOriginal {
+    let mut tr = TransactionOriginal::new(
+        AccountId::from_str(&in_tr.signer_id.as_str()).unwrap(),
+        PublicKey::ED25519(ED25519PublicKey(in_tr.public_key)),
+        AccountId::from_str(&in_tr.receiver_id.as_str()).unwrap(),
+        in_tr.nonce,
+        CryptoHash(in_tr.block_hash),
+    );
+    for aco in &in_tr.actions {
+        let ac = aco.clone();
+        let action: ActionOriginal = match ac {
+            Action::CreateAccount(..) => {
+                ActionOriginal::CreateAccount(CreateAccountActionOriginal {})
+            }
+            Action::DeployContract(x) => {
+                ActionOriginal::DeployContract(DeployContractActionOriginal { code: x.code })
+            }
+            Action::FunctionCall(x) => ActionOriginal::FunctionCall(FunctionCallActionOriginal {
+                method_name: x.method_name,
+                args: x.args,
+                gas: x.gas,
+                deposit: x.deposit,
+            }),
+            Action::Transfer(x) => {
+                ActionOriginal::Transfer(TransferActionOriginal { deposit: x.deposit })
+            }
+            Action::Stake(x) => {
+                let pk = PublicKey::ED25519(ED25519PublicKey(x.public_key));
+                ActionOriginal::Stake(StakeActionOriginal {
+                    stake: x.stake,
+                    public_key: pk,
+                })
+            }
+            Action::AddKey(x) => {
+                let pk = PublicKey::ED25519(ED25519PublicKey(x.public_key));
+
+                let ak = match x.access_key.permission {
+                    AccessKeyPermission::Fieldless(..) => AccessKeyOriginal {
+                        nonce: x.access_key.nonce,
+                        permission: AccessKeyPermissionOriginal::FullAccess,
+                    },
+                    AccessKeyPermission::FunctionCall(fc) => AccessKeyOriginal {
+                        nonce: x.access_key.nonce,
+                        permission: AccessKeyPermissionOriginal::FunctionCall(
+                            FunctionCallPermissionOriginal {
+                                allowance: fc.allowance,
+                                receiver_id: fc.receiver_id,
+                                method_names: fc.method_names,
+                            },
+                        ),
+                    },
+                };
+                ActionOriginal::AddKey(AddKeyActionOriginal {
+                    public_key: pk,
+                    access_key: ak,
+                })
+            }
+            Action::DeleteKey(x) => {
+                let pk = PublicKey::ED25519(ED25519PublicKey(x.public_key));
+                ActionOriginal::DeleteKey(DeleteKeyActionOriginal { public_key: pk })
+            }
+            Action::DeleteAccount(x) => {
+                ActionOriginal::DeleteAccount(DeleteAccountActionOriginal {
+                    beneficiary_id: AccountId::from_str(x.beneficiary_id.as_str()).unwrap(),
+                })
+            }
+            Action::Delegate(x) => {
+                let pk = PublicKey::ED25519(ED25519PublicKey(x.delegate_action.public_key));
+
+                let da = DelegateActionOriginal {
+                    sender_id: AccountId::from_str(x.delegate_action.sender_id.as_str()).unwrap(),
+
+                    receiver_id: AccountId::from_str(x.delegate_action.receiver_id.as_str())
+                        .unwrap(),
+
+                    actions: get_delegate_actions(x.delegate_action.clone()),
+                    nonce: x.delegate_action.nonce,
+                    max_block_height: x.delegate_action.max_block_height,
+                    public_key: pk,
+                };
+
+                let signature = Signature::from_parts(KeyType::ED25519, &x.signature).unwrap();
+                let delegate_action = SignedDelegateActionOriginal {
+                    delegate_action: da,
+                    signature: signature,
+                };
+                if !delegate_action.verify() {
+                    panic!("Incorrect deligate sign")
+                }
+                let action = ActionOriginal::Delegate(delegate_action);
+                action
+            }
+        };
+        tr.actions.push(action);
+    }
+    return tr;
+}
+
+
 fn get_delegate_actions(da: DelegateAction) -> Vec<NonDelegateAction> {
     let mut dactions: Vec<NonDelegateAction> = Vec::new();
     for dac in da.actions {
@@ -295,7 +393,6 @@ fn get_delegate_actions(da: DelegateAction) -> Vec<NonDelegateAction> {
     dactions
 }
 
-
 use pyo3::types::PyBytes;
 
 #[pymethods]
@@ -334,7 +431,6 @@ impl DelegateAction {
         return *action.get_nep461_hash().as_bytes();
     }
 
-
     #[pyo3(text_signature = "() -> bytes")]
     fn serialize(&self) -> PyResult<Py<PyBytes>> {
         let pk = PublicKey::ED25519(ED25519PublicKey(self.public_key));
@@ -354,12 +450,12 @@ impl DelegateAction {
         Ok(pybytes.into())
     }
 
-
     #[staticmethod]
     #[pyo3(signature = (bytes))]
     fn bytes_to_json(mut bytes: &[u8]) -> String {
         let bytes_mut: &mut &[u8] = &mut bytes;
-        let action: DelegateActionOriginal = near_primitives::borsh::BorshDeserialize::deserialize(bytes_mut).unwrap();
+        let action: DelegateActionOriginal =
+            near_primitives::borsh::BorshDeserialize::deserialize(bytes_mut).unwrap();
         return serde_json::to_string(&action).unwrap();
     }
 }
@@ -473,113 +569,20 @@ impl Transaction {
         }
     }
 
+    #[pyo3(signature = ())]
+    fn get_hash(&self) -> Vec<u8> {
+        let tr = get_orig_transaction(&self);
+        return tr.get_hash_and_size().0.as_bytes().to_vec();
+    }
+
     #[pyo3(signature = (secret_key))]
     fn to_vec(&self, secret_key: [u8; 64]) -> Vec<u8> {
-        let mut tr = TransactionOriginal::new(
-            AccountId::from_str(&self.signer_id.as_str()).unwrap(),
-            PublicKey::ED25519(ED25519PublicKey(self.public_key)),
-            AccountId::from_str(&self.receiver_id.as_str()).unwrap(),
-            self.nonce,
-            CryptoHash(self.block_hash),
-        );
-
-        for aco in &self.actions {
-            let ac = aco.clone();
-            let action: ActionOriginal = match ac {
-                Action::CreateAccount(..) => {
-                    ActionOriginal::CreateAccount(CreateAccountActionOriginal {})
-                }
-                Action::DeployContract(x) => {
-                    ActionOriginal::DeployContract(DeployContractActionOriginal { code: x.code })
-                }
-                Action::FunctionCall(x) => {
-                    ActionOriginal::FunctionCall(FunctionCallActionOriginal {
-                        method_name: x.method_name,
-                        args: x.args,
-                        gas: x.gas,
-                        deposit: x.deposit,
-                    })
-                }
-                Action::Transfer(x) => {
-                    ActionOriginal::Transfer(TransferActionOriginal { deposit: x.deposit })
-                }
-                Action::Stake(x) => {
-                    let pk = PublicKey::ED25519(ED25519PublicKey(x.public_key));
-                    ActionOriginal::Stake(StakeActionOriginal {
-                        stake: x.stake,
-                        public_key: pk,
-                    })
-                }
-                Action::AddKey(x) => {
-                    let pk = PublicKey::ED25519(ED25519PublicKey(x.public_key));
-
-                    let ak = match x.access_key.permission {
-                        AccessKeyPermission::Fieldless(..) => AccessKeyOriginal {
-                            nonce: x.access_key.nonce,
-                            permission: AccessKeyPermissionOriginal::FullAccess,
-                        },
-                        AccessKeyPermission::FunctionCall(fc) => AccessKeyOriginal {
-                            nonce: x.access_key.nonce,
-                            permission: AccessKeyPermissionOriginal::FunctionCall(
-                                FunctionCallPermissionOriginal {
-                                    allowance: fc.allowance,
-                                    receiver_id: fc.receiver_id,
-                                    method_names: fc.method_names,
-                                },
-                            ),
-                        },
-                    };
-                    ActionOriginal::AddKey(AddKeyActionOriginal {
-                        public_key: pk,
-                        access_key: ak,
-                    })
-                }
-                Action::DeleteKey(x) => {
-                    let pk = PublicKey::ED25519(ED25519PublicKey(x.public_key));
-                    ActionOriginal::DeleteKey(DeleteKeyActionOriginal { public_key: pk })
-                }
-                Action::DeleteAccount(x) => {
-                    ActionOriginal::DeleteAccount(DeleteAccountActionOriginal {
-                        beneficiary_id: AccountId::from_str(x.beneficiary_id.as_str()).unwrap(),
-                    })
-                }
-                Action::Delegate(x) => {
-                    let pk = PublicKey::ED25519(ED25519PublicKey(x.delegate_action.public_key));
-
-                    let da = DelegateActionOriginal {
-                        sender_id: AccountId::from_str(x.delegate_action.sender_id.as_str())
-                            .unwrap(),
-
-                        receiver_id: AccountId::from_str(x.delegate_action.receiver_id.as_str())
-                            .unwrap(),
-
-                        actions: get_delegate_actions(x.delegate_action.clone()),
-                        nonce: x.delegate_action.nonce,
-                        max_block_height: x.delegate_action.max_block_height,
-                        public_key: pk,
-                    };
-
-                    let signature = Signature::from_parts(KeyType::ED25519, &x.signature).unwrap();
-                    let delegate_action = SignedDelegateActionOriginal {
-                        delegate_action: da,
-                        signature: signature,
-                    };
-                    if !delegate_action.verify() {
-                        panic!("Incorrect deligate sign")
-                    }
-                    let action = ActionOriginal::Delegate(delegate_action);
-                    action
-                }
-            };
-            tr.actions.push(action);
-        }
-
+        let tr = get_orig_transaction(&self);
         let key = near_crypto::SecretKey::ED25519(ED25519SecretKey(secret_key));
         let signer = near_crypto::InMemorySigner::from_secret_key(
             AccountId::from_str(&tr.signer_id.to_string()).unwrap(),
             key,
         );
-
         let strx = tr.sign(&signer);
         strx.try_to_vec().unwrap()
     }

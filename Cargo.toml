@@ -1,11 +1,10 @@
 [package]
 name = "py_near_primitives"
-version = "0.2.2"
+version = "0.2.1"
 edition = "2021"
 include = ["/src", "/LICENSE", "/pyproject.toml"]
 description = "Python bindings for NEAR Rust primitives."
 license = "MIT"
-repository = "https://github.com/kevinheavey/pyonear"
 
 [lib]
 name = "py_near_primitives"
