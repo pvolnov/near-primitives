@@ -1,3 +1,4 @@
+use std::hash::Hash;
 use std::str::FromStr;
 
 use derive_more::From;
@@ -27,7 +28,8 @@ use near_primitives::{
         DeleteAccountAction as DeleteAccountActionOriginal,
         DeleteKeyAction as DeleteKeyActionOriginal,
         DeployContractAction as DeployContractActionOriginal,
-        FunctionCallAction as FunctionCallActionOriginal, StakeAction as StakeActionOriginal,
+        FunctionCallAction as FunctionCallActionOriginal,
+        SignedTransaction as SignedTransactionOriginal, StakeAction as StakeActionOriginal,
         Transaction as TransactionOriginal, TransferAction as TransferActionOriginal,
     },
     types::{AccountId, Balance, Nonce},
@@ -263,7 +265,9 @@ impl From<DelegateAction> for DelegateActionOriginal {
                 .into_iter()
                 .map(|action| {
                     let original_action = ActionOriginal::from(action);
-                    original_action.try_into().expect("Deligate action not supported")
+                    original_action
+                        .try_into()
+                        .expect("Deligate action not supported")
                 })
                 .collect(),
             nonce: value.nonce,
@@ -738,6 +742,56 @@ impl Transaction {
             block_hash: original_tx.block_hash.0,
             actions: original_tx.actions.into_iter().map(Action::from).collect(),
         }
+    }
+}
+
+#[pyclass]
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct SignedTransaction {
+    #[pyo3(get, set)]
+    pub transaction: Transaction,
+    #[pyo3(get, set)]
+    pub signature: [u8; 64],
+    #[pyo3(get, set)]
+    pub hash: [u8; 32],
+    #[pyo3(get, set)]
+    pub size: u64,
+}
+
+impl From<SignedTransaction> for SignedTransactionOriginal {
+    fn from(value: SignedTransaction) -> Self {
+        let transaction = get_orig_transaction(&value.transaction);
+        let signature =
+            Signature::ED25519(ed25519_dalek::Signature::from_bytes(&value.signature).unwrap());
+
+        // TODO: hash & size are private, this is only way to create. fix
+        SignedTransactionOriginal::new(signature, transaction)
+    }
+}
+
+#[pymethods]
+impl SignedTransaction {
+    #[new]
+    #[pyo3(signature = (signature, transaction))]
+    fn new(signature: [u8; 64], transaction: Transaction) -> Self {
+        let original_tx = get_orig_transaction(&transaction);
+        let original_signed_tx = SignedTransactionOriginal::new(
+            Signature::ED25519(ed25519_dalek::Signature::from_bytes(&signature).unwrap()),
+            original_tx,
+        );
+
+        Self {
+            transaction,
+            signature,
+            hash: original_signed_tx.get_hash().0,
+            size: original_signed_tx.get_size(),
+        }
+    }
+
+    #[pyo3(signature = ())]
+    fn serialize(&self) -> Vec<u8> {
+        let original_signed_tx: SignedTransactionOriginal = self.clone().into();
+        original_signed_tx.try_to_vec().unwrap()
     }
 }
 
