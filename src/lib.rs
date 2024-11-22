@@ -10,7 +10,6 @@ use solders_macros::EnumIntoPy;
 
 use near_crypto::ED25519PublicKey;
 use near_crypto::ED25519SecretKey;
-use near_primitives::delegate_action::NonDelegateAction;
 use near_primitives_core::hash::CryptoHash;
 
 use near_primitives::{
@@ -46,6 +45,24 @@ pub struct AccessKey {
     pub permission: AccessKeyPermission,
 }
 
+impl From<AccessKey> for AccessKeyOriginal {
+    fn from(value: AccessKey) -> Self {
+        Self {
+            nonce: value.nonce,
+            permission: value.permission.into(),
+        }
+    }
+}
+
+impl From<AccessKeyOriginal> for AccessKey {
+    fn from(value: AccessKeyOriginal) -> Self {
+        Self {
+            nonce: value.nonce,
+            permission: value.permission.into(),
+        }
+    }
+}
+
 #[pyclass]
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug, From, Into)]
 pub struct FunctionCallPermission {
@@ -79,6 +96,38 @@ pub enum AccessKeyPermissionFieldless {
 pub enum AccessKeyPermission {
     FunctionCall(FunctionCallPermission),
     Fieldless(AccessKeyPermissionFieldless),
+}
+
+impl From<AccessKeyPermission> for AccessKeyPermissionOriginal {
+    fn from(value: AccessKeyPermission) -> Self {
+        match value {
+            AccessKeyPermission::Fieldless(_) => AccessKeyPermissionOriginal::FullAccess,
+            AccessKeyPermission::FunctionCall(value) => {
+                AccessKeyPermissionOriginal::FunctionCall(FunctionCallPermissionOriginal {
+                    allowance: value.allowance,
+                    receiver_id: value.receiver_id,
+                    method_names: value.method_names,
+                })
+            }
+        }
+    }
+}
+
+impl From<AccessKeyPermissionOriginal> for AccessKeyPermission {
+    fn from(value: AccessKeyPermissionOriginal) -> Self {
+        match value {
+            AccessKeyPermissionOriginal::FullAccess => {
+                AccessKeyPermission::Fieldless(AccessKeyPermissionFieldless::FullAccess)
+            }
+            AccessKeyPermissionOriginal::FunctionCall(value) => {
+                AccessKeyPermission::FunctionCall(FunctionCallPermission {
+                    allowance: value.allowance,
+                    receiver_id: value.receiver_id,
+                    method_names: value.method_names,
+                })
+            }
+        }
+    }
 }
 
 #[pymethods]
@@ -122,14 +171,70 @@ pub enum Action {
     Delegate(SignedDelegateAction),
 }
 
+impl From<Action> for ActionOriginal {
+    fn from(value: Action) -> Self {
+        match value {
+            Action::CreateAccount(x) => ActionOriginal::CreateAccount(x.into()),
+            Action::DeployContract(x) => ActionOriginal::DeployContract(x.into()),
+            Action::FunctionCall(x) => ActionOriginal::FunctionCall(x.into()),
+            Action::Transfer(x) => ActionOriginal::Transfer(x.into()),
+            Action::Stake(x) => ActionOriginal::Stake(x.into()),
+            Action::AddKey(x) => ActionOriginal::AddKey(x.into()),
+            Action::DeleteKey(x) => ActionOriginal::DeleteKey(x.into()),
+            Action::DeleteAccount(x) => ActionOriginal::DeleteAccount(x.into()),
+            Action::Delegate(x) => ActionOriginal::Delegate(x.into()),
+        }
+    }
+}
+
+impl From<ActionOriginal> for Action {
+    fn from(value: ActionOriginal) -> Self {
+        match value {
+            ActionOriginal::CreateAccount(x) => Action::CreateAccount(x.into()),
+            ActionOriginal::DeployContract(x) => Action::DeployContract(x.into()),
+            ActionOriginal::FunctionCall(x) => Action::FunctionCall(x.into()),
+            ActionOriginal::Transfer(x) => Action::Transfer(x.into()),
+            ActionOriginal::Stake(x) => Action::Stake(x.into()),
+            ActionOriginal::AddKey(x) => Action::AddKey(x.into()),
+            ActionOriginal::DeleteKey(x) => Action::DeleteKey(x.into()),
+            ActionOriginal::DeleteAccount(x) => Action::DeleteAccount(x.into()),
+            ActionOriginal::Delegate(x) => Action::Delegate(x.into()),
+        }
+    }
+}
+
 #[pyclass]
 #[derive(PartialEq, Eq, Clone, Debug)]
-
 pub struct SignedDelegateAction {
     #[pyo3(get, set)]
     pub delegate_action: DelegateAction,
     #[pyo3(get, set)]
     pub signature: [u8; 64],
+}
+
+impl From<SignedDelegateAction> for SignedDelegateActionOriginal {
+    fn from(value: SignedDelegateAction) -> Self {
+        Self {
+            signature: Signature::ED25519(
+                ed25519_dalek::Signature::from_bytes(&value.signature).unwrap(),
+            ),
+            delegate_action: value.delegate_action.into(),
+        }
+    }
+}
+
+impl From<SignedDelegateActionOriginal> for SignedDelegateAction {
+    fn from(value: SignedDelegateActionOriginal) -> Self {
+        let signature = match value.signature {
+            Signature::SECP256K1(_) => panic!("SECP256K1 signature unsupported"),
+            Signature::ED25519(signature) => signature.to_bytes(),
+        };
+
+        Self {
+            signature,
+            delegate_action: value.delegate_action.into(),
+        }
+    }
 }
 
 #[pyclass]
@@ -148,10 +253,63 @@ pub struct DelegateAction {
     pub public_key: [u8; 32],
 }
 
+impl From<DelegateAction> for DelegateActionOriginal {
+    fn from(value: DelegateAction) -> Self {
+        Self {
+            sender_id: AccountId::from_str(value.sender_id.as_str()).unwrap(),
+            receiver_id: AccountId::from_str(value.receiver_id.as_str()).unwrap(),
+            actions: value
+                .actions
+                .into_iter()
+                .map(|action| {
+                    let original_action = ActionOriginal::from(action);
+                    original_action.try_into().expect("Deligate action not supported")
+                })
+                .collect(),
+            nonce: value.nonce,
+            max_block_height: value.max_block_height,
+            public_key: PublicKey::ED25519(ED25519PublicKey(value.public_key)),
+        }
+    }
+}
+
+impl From<DelegateActionOriginal> for DelegateAction {
+    fn from(value: DelegateActionOriginal) -> Self {
+        let public_key = match value.public_key {
+            PublicKey::SECP256K1(_) => panic!("512 bit elliptic curve unsupported!"),
+            PublicKey::ED25519(value) => value.0,
+        };
+
+        Self {
+            sender_id: value.sender_id.to_string(),
+            receiver_id: value.sender_id.to_string(),
+            actions: value
+                .actions
+                .into_iter()
+                .map(|el| Action::from(ActionOriginal::from(el)))
+                .collect(),
+            nonce: value.nonce,
+            max_block_height: value.max_block_height,
+            public_key,
+        }
+    }
+}
+
 #[pyclass]
 #[derive(PartialEq, Eq, Clone, Debug)]
-
 pub struct CreateAccountAction {}
+
+impl From<CreateAccountActionOriginal> for CreateAccountAction {
+    fn from(_: CreateAccountActionOriginal) -> Self {
+        Self {}
+    }
+}
+
+impl From<CreateAccountAction> for CreateAccountActionOriginal {
+    fn from(_: CreateAccountAction) -> Self {
+        Self {}
+    }
+}
 
 #[pyclass]
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -161,9 +319,20 @@ pub struct DeployContractAction {
     pub code: Vec<u8>,
 }
 
+impl From<DeployContractAction> for DeployContractActionOriginal {
+    fn from(value: DeployContractAction) -> Self {
+        Self { code: value.code }
+    }
+}
+
+impl From<DeployContractActionOriginal> for DeployContractAction {
+    fn from(value: DeployContractActionOriginal) -> Self {
+        Self { code: value.code }
+    }
+}
+
 #[pyclass]
 #[derive(PartialEq, Eq, Clone, Debug)]
-
 pub struct FunctionCallAction {
     #[pyo3(get, set)]
     pub method_name: String,
@@ -175,11 +344,49 @@ pub struct FunctionCallAction {
     pub deposit: Balance,
 }
 
+impl From<FunctionCallAction> for FunctionCallActionOriginal {
+    fn from(value: FunctionCallAction) -> Self {
+        Self {
+            method_name: value.method_name,
+            args: value.args,
+            gas: value.gas,
+            deposit: value.deposit,
+        }
+    }
+}
+
+impl From<FunctionCallActionOriginal> for FunctionCallAction {
+    fn from(value: FunctionCallActionOriginal) -> Self {
+        Self {
+            method_name: value.method_name,
+            args: value.args,
+            gas: value.gas,
+            deposit: value.deposit,
+        }
+    }
+}
+
 #[pyclass]
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct TransferAction {
     #[pyo3(get, set)]
     pub deposit: Balance,
+}
+
+impl From<TransferAction> for TransferActionOriginal {
+    fn from(value: TransferAction) -> Self {
+        Self {
+            deposit: value.deposit,
+        }
+    }
+}
+
+impl From<TransferActionOriginal> for TransferAction {
+    fn from(value: TransferActionOriginal) -> Self {
+        Self {
+            deposit: value.deposit,
+        }
+    }
 }
 
 #[pyclass]
@@ -191,6 +398,29 @@ pub struct StakeAction {
     pub public_key: [u8; 32],
 }
 
+impl From<StakeAction> for StakeActionOriginal {
+    fn from(value: StakeAction) -> Self {
+        Self {
+            stake: value.stake,
+            public_key: PublicKey::ED25519(ED25519PublicKey(value.public_key)),
+        }
+    }
+}
+
+impl From<StakeActionOriginal> for StakeAction {
+    fn from(value: StakeActionOriginal) -> Self {
+        let public_key = match value.public_key {
+            PublicKey::SECP256K1(_) => panic!("512 bit elliptic curve unsupported!"),
+            PublicKey::ED25519(value) => value.0,
+        };
+
+        Self {
+            stake: value.stake,
+            public_key,
+        }
+    }
+}
+
 #[pyclass]
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct AddKeyAction {
@@ -200,6 +430,30 @@ pub struct AddKeyAction {
     pub access_key: AccessKey,
 }
 
+impl From<AddKeyAction> for AddKeyActionOriginal {
+    fn from(value: AddKeyAction) -> Self {
+        let public_key = PublicKey::ED25519(ED25519PublicKey(value.public_key));
+        Self {
+            public_key,
+            access_key: value.access_key.into(),
+        }
+    }
+}
+
+impl From<AddKeyActionOriginal> for AddKeyAction {
+    fn from(value: AddKeyActionOriginal) -> Self {
+        let public_key = match value.public_key {
+            PublicKey::SECP256K1(_) => panic!("512 bit elliptic curve unsupported!"),
+            PublicKey::ED25519(public_key) => public_key.0,
+        };
+
+        Self {
+            public_key,
+            access_key: value.access_key.into(),
+        }
+    }
+}
+
 #[pyclass]
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct DeleteKeyAction {
@@ -207,11 +461,46 @@ pub struct DeleteKeyAction {
     pub public_key: [u8; 32],
 }
 
+impl From<DeleteKeyAction> for DeleteKeyActionOriginal {
+    fn from(value: DeleteKeyAction) -> Self {
+        Self {
+            public_key: PublicKey::ED25519(ED25519PublicKey(value.public_key)),
+        }
+    }
+}
+
+impl From<DeleteKeyActionOriginal> for DeleteKeyAction {
+    fn from(value: DeleteKeyActionOriginal) -> Self {
+        let public_key = match value.public_key {
+            PublicKey::SECP256K1(_) => panic!("512 bit elliptic curve unsupported!"),
+            PublicKey::ED25519(public_key) => public_key.0,
+        };
+
+        Self { public_key }
+    }
+}
+
 #[pyclass]
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct DeleteAccountAction {
     #[pyo3(get, set)]
     pub beneficiary_id: String,
+}
+
+impl From<DeleteAccountAction> for DeleteAccountActionOriginal {
+    fn from(value: DeleteAccountAction) -> Self {
+        Self {
+            beneficiary_id: AccountId::from_str(&value.beneficiary_id).unwrap(),
+        }
+    }
+}
+
+impl From<DeleteAccountActionOriginal> for DeleteAccountAction {
+    fn from(value: DeleteAccountActionOriginal) -> Self {
+        Self {
+            beneficiary_id: value.beneficiary_id.to_string(),
+        }
+    }
 }
 
 #[pymethods]
@@ -234,163 +523,18 @@ fn get_orig_transaction(in_tr: &Transaction) -> TransactionOriginal {
         in_tr.nonce,
         CryptoHash(in_tr.block_hash),
     );
-    for aco in &in_tr.actions {
-        let ac = aco.clone();
-        let action: ActionOriginal = match ac {
-            Action::CreateAccount(..) => {
-                ActionOriginal::CreateAccount(CreateAccountActionOriginal {})
-            }
-            Action::DeployContract(x) => {
-                ActionOriginal::DeployContract(DeployContractActionOriginal { code: x.code })
-            }
-            Action::FunctionCall(x) => ActionOriginal::FunctionCall(FunctionCallActionOriginal {
-                method_name: x.method_name,
-                args: x.args,
-                gas: x.gas,
-                deposit: x.deposit,
-            }),
-            Action::Transfer(x) => {
-                ActionOriginal::Transfer(TransferActionOriginal { deposit: x.deposit })
-            }
-            Action::Stake(x) => {
-                let pk = PublicKey::ED25519(ED25519PublicKey(x.public_key));
-                ActionOriginal::Stake(StakeActionOriginal {
-                    stake: x.stake,
-                    public_key: pk,
-                })
-            }
-            Action::AddKey(x) => {
-                let pk = PublicKey::ED25519(ED25519PublicKey(x.public_key));
 
-                let ak = match x.access_key.permission {
-                    AccessKeyPermission::Fieldless(..) => AccessKeyOriginal {
-                        nonce: x.access_key.nonce,
-                        permission: AccessKeyPermissionOriginal::FullAccess,
-                    },
-                    AccessKeyPermission::FunctionCall(fc) => AccessKeyOriginal {
-                        nonce: x.access_key.nonce,
-                        permission: AccessKeyPermissionOriginal::FunctionCall(
-                            FunctionCallPermissionOriginal {
-                                allowance: fc.allowance,
-                                receiver_id: fc.receiver_id,
-                                method_names: fc.method_names,
-                            },
-                        ),
-                    },
-                };
-                ActionOriginal::AddKey(AddKeyActionOriginal {
-                    public_key: pk,
-                    access_key: ak,
-                })
-            }
-            Action::DeleteKey(x) => {
-                let pk = PublicKey::ED25519(ED25519PublicKey(x.public_key));
-                ActionOriginal::DeleteKey(DeleteKeyActionOriginal { public_key: pk })
-            }
-            Action::DeleteAccount(x) => {
-                ActionOriginal::DeleteAccount(DeleteAccountActionOriginal {
-                    beneficiary_id: AccountId::from_str(x.beneficiary_id.as_str()).unwrap(),
-                })
-            }
-            Action::Delegate(x) => {
-                let pk = PublicKey::ED25519(ED25519PublicKey(x.delegate_action.public_key));
+    let original_actions: Vec<ActionOriginal> = in_tr
+        .actions
+        .iter()
+        .map(|action| {
+            let action = action.clone();
+            action.into()
+        })
+        .collect();
+    tr.actions = original_actions;
 
-                let da = DelegateActionOriginal {
-                    sender_id: AccountId::from_str(x.delegate_action.sender_id.as_str()).unwrap(),
-
-                    receiver_id: AccountId::from_str(x.delegate_action.receiver_id.as_str())
-                        .unwrap(),
-
-                    actions: get_delegate_actions(x.delegate_action.clone()),
-                    nonce: x.delegate_action.nonce,
-                    max_block_height: x.delegate_action.max_block_height,
-                    public_key: pk,
-                };
-
-                let signature = Signature::from_parts(KeyType::ED25519, &x.signature).unwrap();
-                let delegate_action = SignedDelegateActionOriginal {
-                    delegate_action: da,
-                    signature: signature,
-                };
-                if !delegate_action.verify() {
-                    panic!("Incorrect deligate sign")
-                }
-                let action = ActionOriginal::Delegate(delegate_action);
-                action
-            }
-        };
-        tr.actions.push(action);
-    }
-    return tr;
-}
-
-
-fn get_delegate_actions(da: DelegateAction) -> Vec<NonDelegateAction> {
-    let mut dactions: Vec<NonDelegateAction> = Vec::new();
-    for dac in da.actions {
-        let delegate_action: ActionOriginal = match dac {
-            Action::CreateAccount(..) => {
-                ActionOriginal::CreateAccount(CreateAccountActionOriginal {})
-            }
-            Action::DeployContract(x) => {
-                ActionOriginal::DeployContract(DeployContractActionOriginal { code: x.code })
-            }
-            Action::FunctionCall(x) => ActionOriginal::FunctionCall(FunctionCallActionOriginal {
-                method_name: x.method_name,
-                args: x.args,
-                gas: x.gas,
-                deposit: x.deposit,
-            }),
-            Action::Transfer(x) => {
-                ActionOriginal::Transfer(TransferActionOriginal { deposit: x.deposit })
-            }
-            Action::Stake(x) => {
-                let pk = PublicKey::ED25519(ED25519PublicKey(x.public_key));
-                ActionOriginal::Stake(StakeActionOriginal {
-                    stake: x.stake,
-                    public_key: pk,
-                })
-            }
-            Action::AddKey(x) => {
-                let pk = PublicKey::ED25519(ED25519PublicKey(x.public_key));
-
-                let ak = match x.access_key.permission {
-                    AccessKeyPermission::Fieldless(..) => AccessKeyOriginal {
-                        nonce: x.access_key.nonce,
-                        permission: AccessKeyPermissionOriginal::FullAccess,
-                    },
-                    AccessKeyPermission::FunctionCall(fc) => AccessKeyOriginal {
-                        nonce: x.access_key.nonce,
-                        permission: AccessKeyPermissionOriginal::FunctionCall(
-                            FunctionCallPermissionOriginal {
-                                allowance: fc.allowance,
-                                receiver_id: fc.receiver_id,
-                                method_names: fc.method_names,
-                            },
-                        ),
-                    },
-                };
-                ActionOriginal::AddKey(AddKeyActionOriginal {
-                    public_key: pk,
-                    access_key: ak,
-                })
-            }
-            Action::DeleteKey(x) => {
-                let pk = PublicKey::ED25519(ED25519PublicKey(x.public_key));
-                ActionOriginal::DeleteKey(DeleteKeyActionOriginal { public_key: pk })
-            }
-            Action::DeleteAccount(x) => {
-                ActionOriginal::DeleteAccount(DeleteAccountActionOriginal {
-                    beneficiary_id: AccountId::from_str(x.beneficiary_id.as_str()).unwrap(),
-                })
-            }
-            Action::Delegate(..) => {
-                panic!("Deligate action not supported");
-            }
-        };
-        dactions.push(delegate_action.try_into().unwrap());
-    }
-    dactions
+    tr
 }
 
 use pyo3::types::PyBytes;
@@ -418,32 +562,14 @@ impl DelegateAction {
     }
 
     fn get_nep461_hash(&self) -> [u8; 32] {
-        let pk = PublicKey::ED25519(ED25519PublicKey(self.public_key));
-
-        let action = DelegateActionOriginal {
-            sender_id: AccountId::from_str(self.sender_id.as_str()).unwrap(),
-            receiver_id: AccountId::from_str(self.receiver_id.as_str()).unwrap(),
-            actions: get_delegate_actions(self.clone()),
-            nonce: self.nonce,
-            max_block_height: self.max_block_height,
-            public_key: pk,
-        };
-        return *action.get_nep461_hash().as_bytes();
+        let action: DelegateActionOriginal = self.clone().into();
+        *action.get_nep461_hash().as_bytes()
     }
 
     #[pyo3(text_signature = "() -> bytes")]
     fn serialize(&self) -> PyResult<Py<PyBytes>> {
-        let pk = PublicKey::ED25519(ED25519PublicKey(self.public_key));
-        let action = DelegateActionOriginal {
-            sender_id: AccountId::from_str(self.sender_id.as_str()).unwrap(),
-            receiver_id: AccountId::from_str(self.receiver_id.as_str()).unwrap(),
-            actions: get_delegate_actions(self.clone()),
-            nonce: self.nonce,
-            max_block_height: self.max_block_height,
-            public_key: pk,
-        };
+        let action: DelegateActionOriginal = self.clone().into();
         let res = action.try_to_vec().unwrap().to_vec();
-
         let py = unsafe { Python::assume_gil_acquired() };
         let pybytes = PyBytes::new(py, &res);
 
@@ -456,7 +582,8 @@ impl DelegateAction {
         let bytes_mut: &mut &[u8] = &mut bytes;
         let action: DelegateActionOriginal =
             near_primitives::borsh::BorshDeserialize::deserialize(bytes_mut).unwrap();
-        return serde_json::to_string(&action).unwrap();
+
+        serde_json::to_string(&action).unwrap()
     }
 }
 
@@ -545,7 +672,6 @@ impl DeleteAccountAction {
         }
     }
 }
-use near_crypto::KeyType;
 
 #[pymethods]
 impl Transaction {
@@ -585,6 +711,33 @@ impl Transaction {
         );
         let strx = tr.sign(&signer);
         strx.try_to_vec().unwrap()
+    }
+
+    #[pyo3(signature = ())]
+    fn serialize(&self) -> Vec<u8> {
+        let tr = get_orig_transaction(&self);
+        tr.try_to_vec().unwrap()
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (bytes))]
+    fn deserialize(mut bytes: &[u8]) -> Self {
+        let bytes = &mut bytes;
+        let original_tx: TransactionOriginal =
+            near_primitives::borsh::BorshDeserialize::deserialize(bytes).unwrap();
+        let public_key = match original_tx.public_key {
+            PublicKey::SECP256K1(_) => panic!("512 bit elliptic curve unsupported!"),
+            PublicKey::ED25519(public_key) => public_key.0,
+        };
+
+        Self {
+            nonce: original_tx.nonce,
+            signer_id: original_tx.signer_id.into(),
+            public_key,
+            receiver_id: original_tx.receiver_id.into(),
+            block_hash: original_tx.block_hash.0,
+            actions: original_tx.actions.into_iter().map(Action::from).collect(),
+        }
     }
 }
 
