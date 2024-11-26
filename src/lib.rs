@@ -812,5 +812,6 @@ fn py_near_primitives(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<AccessKey>()?;
     m.add_class::<AccessKeyPermissionFieldless>()?;
     m.add_class::<FunctionCallPermission>()?;
+    m.add_class::<SignedTransaction>()?;
     Ok(())
 }
