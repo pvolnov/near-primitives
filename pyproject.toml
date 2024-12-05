@@ -40,6 +40,3 @@ classifiers = [
 homepage = "https://github.com/pvolnov/near-primitives"
 documentation = "https://github.com/pvolnov/near-primitives"
 repository = "https://github.com/pvolnov/near-primitives"
-
-[tool.maturin]
-python-source = "python"
