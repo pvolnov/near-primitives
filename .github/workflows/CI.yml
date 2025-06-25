@@ -41,23 +41,25 @@ jobs:
 
   macos:
     runs-on: macos-latest
+    strategy:
+      matrix:
+        target: [x86_64-apple-darwin, aarch64-apple-darwin]
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-      - name: Build universal2 wheel (x86_64 + arm64)
+      - name: Build wheel for ${{ matrix.target }}
         uses: PyO3/maturin-action@v1
         with:
-          args: --release --out dist -- --universal2
+          target: ${{ matrix.target }}
+          args: --release --out dist
           sccache: 'true'
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-macos
+          name: wheels-macos-${{ matrix.target }}
           path: dist/
-          if-no-files-found: error
-          retention-days: 7
 
   windows:
     runs-on: windows-latest
