@@ -49,7 +49,7 @@ jobs:
       - name: Build universal2 wheel (x86_64 + arm64)
         uses: PyO3/maturin-action@v1
         with:
-          args: --release --out dist --universal2
+          args: --release --out dist -- --universal2
           sccache: 'true'
       - name: Upload wheels
         uses: actions/upload-artifact@v4
