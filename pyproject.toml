@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "py_near_primitives"
-version = "0.2.3"
+version = "0.2.4"
 description = "Python bindings for NEAR Rust primitives."
 authors = ["pvolnov <notanemail@gmail.com>"]
 license = "MIT"
@@ -25,7 +25,7 @@ build-backend = "maturin"
 
 [project]
 name = "py_near_primitives"
-version = "0.2.3"
+version = "0.2.4"
 description = "Python bindings for NEAR Rust primitives."
 authors = [ {name = "pvolnov", email = "notanemail@gmail.com"} ]
 license = {file = "LICENSE"} # relative to the package/ directory
@@ -40,6 +40,3 @@ classifiers = [
 homepage = "https://github.com/pvolnov/near-primitives"
 documentation = "https://github.com/pvolnov/near-primitives"
 repository = "https://github.com/pvolnov/near-primitives"
-
-[tool.maturin]
-python-source = "python"
