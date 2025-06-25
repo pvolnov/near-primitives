@@ -64,29 +64,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  macos:
-    runs-on: macos-latest
-    strategy:
-      matrix:
-        target: [x86_64, aarch64]
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.target }}
-          args: --release --out dist
-          sccache: 'true'
-      - name: Upload wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-macos_macos
-          path: dist/
-          if-no-files-found: error
-          retention-days: 7
 
   sdist:
     runs-on: ubuntu-latest
