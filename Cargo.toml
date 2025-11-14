@@ -1,6 +1,6 @@
 [package]
 name = "py_near_primitives"
-version = "0.2.3"
+version = "0.2.5"
 edition = "2021"
 include = ["/src", "/LICENSE", "/pyproject.toml"]
 description = "Python bindings for NEAR Rust primitives."
