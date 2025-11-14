@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use solders_macros::pyhash;
 use solders_macros::EnumIntoPy;
 
-use near_crypto::ED25519PublicKey;
+use near_crypto::{ED25519PublicKey, KeyType};
 use near_crypto::ED25519SecretKey;
 use near_primitives_core::hash::CryptoHash;
 
@@ -18,9 +18,10 @@ use near_primitives::{
         AccessKey as AccessKeyOriginal, AccessKeyPermission as AccessKeyPermissionOriginal,
         FunctionCallPermission as FunctionCallPermissionOriginal,
     },
-    delegate_action::{
-        DelegateAction as DelegateActionOriginal,
-        SignedDelegateAction as SignedDelegateActionOriginal,
+    action::{
+        DeployGlobalContractAction as DeployGlobalContractActionOriginal,
+        delegate::DelegateAction as DelegateActionOriginal,
+        delegate::SignedDelegateAction as SignedDelegateActionOriginal,
     },
     transaction::{
         Action as ActionOriginal, AddKeyAction as AddKeyActionOriginal,
@@ -36,6 +37,7 @@ use near_primitives::{
 };
 
 use near_crypto::{PublicKey, Signature};
+use near_primitives::transaction::TransactionV0;
 
 pub type LogEntry = String;
 
@@ -217,16 +219,23 @@ pub struct SignedDelegateAction {
 impl From<SignedDelegateAction> for SignedDelegateActionOriginal {
     fn from(value: SignedDelegateAction) -> Self {
         Self {
-            signature: Signature::ED25519(
-                ed25519_dalek::Signature::from_bytes(&value.signature).unwrap(),
-            ),
+            signature: Signature::from_parts(
+                KeyType::ED25519,
+                &value.signature,
+            ).unwrap(),
             delegate_action: value.delegate_action.into(),
         }
     }
 }
 
-impl From<SignedDelegateActionOriginal> for SignedDelegateAction {
-    fn from(value: SignedDelegateActionOriginal) -> Self {
+impl From<SignedDelegateAction> for Box<SignedDelegateActionOriginal> {
+    fn from(value: SignedDelegateAction) -> Self {
+        Box::new(value.into())
+    }
+}
+
+impl From<Box<SignedDelegateActionOriginal>> for SignedDelegateAction {
+    fn from(value: Box<SignedDelegateActionOriginal>) -> Self {
         let signature = match value.signature {
             Signature::SECP256K1(_) => panic!("SECP256K1 signature unsupported"),
             Signature::ED25519(signature) => signature.to_bytes(),
@@ -359,8 +368,14 @@ impl From<FunctionCallAction> for FunctionCallActionOriginal {
     }
 }
 
-impl From<FunctionCallActionOriginal> for FunctionCallAction {
-    fn from(value: FunctionCallActionOriginal) -> Self {
+impl From<FunctionCallAction> for Box<FunctionCallActionOriginal> {
+    fn from(value: FunctionCallAction) -> Self {
+        Box::new(value.into())
+    }
+}
+
+impl From<Box<FunctionCallActionOriginal>> for FunctionCallAction {
+    fn from(value: Box<FunctionCallActionOriginal>) -> Self {
         Self {
             method_name: value.method_name,
             args: value.args,
@@ -411,8 +426,14 @@ impl From<StakeAction> for StakeActionOriginal {
     }
 }
 
-impl From<StakeActionOriginal> for StakeAction {
-    fn from(value: StakeActionOriginal) -> Self {
+impl From<StakeAction> for Box<StakeActionOriginal> {
+    fn from(value: StakeAction) -> Self {
+        Box::new(value.into())
+    }
+}
+
+impl From<Box<StakeActionOriginal>> for StakeAction {
+    fn from(value: Box<StakeActionOriginal>) -> Self {
         let public_key = match value.public_key {
             PublicKey::SECP256K1(_) => panic!("512 bit elliptic curve unsupported!"),
             PublicKey::ED25519(value) => value.0,
@@ -444,8 +465,14 @@ impl From<AddKeyAction> for AddKeyActionOriginal {
     }
 }
 
-impl From<AddKeyActionOriginal> for AddKeyAction {
-    fn from(value: AddKeyActionOriginal) -> Self {
+impl From<AddKeyAction> for Box<AddKeyActionOriginal> {
+    fn from(value: AddKeyAction) -> Self {
+        Box::new(value.into())
+    }
+}
+
+impl From<Box<AddKeyActionOriginal>> for AddKeyAction {
+    fn from(value: Box<AddKeyActionOriginal>) -> Self {
         let public_key = match value.public_key {
             PublicKey::SECP256K1(_) => panic!("512 bit elliptic curve unsupported!"),
             PublicKey::ED25519(public_key) => public_key.0,
@@ -473,8 +500,14 @@ impl From<DeleteKeyAction> for DeleteKeyActionOriginal {
     }
 }
 
-impl From<DeleteKeyActionOriginal> for DeleteKeyAction {
-    fn from(value: DeleteKeyActionOriginal) -> Self {
+impl From<DeleteKeyAction> for Box<DeleteKeyActionOriginal> {
+    fn from(value: DeleteKeyAction) -> Self {
+        Box::new(value.into())
+    }
+}
+
+impl From<Box<DeleteKeyActionOriginal>> for DeleteKeyAction {
+    fn from(value: Box<DeleteKeyActionOriginal>) -> Self {
         let public_key = match value.public_key {
             PublicKey::SECP256K1(_) => panic!("512 bit elliptic curve unsupported!"),
             PublicKey::ED25519(public_key) => public_key.0,
@@ -520,25 +553,15 @@ impl SignedDelegateAction {
 }
 
 fn get_orig_transaction(in_tr: &Transaction) -> TransactionOriginal {
-    let mut tr = TransactionOriginal::new(
-        AccountId::from_str(&in_tr.signer_id.as_str()).unwrap(),
-        PublicKey::ED25519(ED25519PublicKey(in_tr.public_key)),
-        AccountId::from_str(&in_tr.receiver_id.as_str()).unwrap(),
-        in_tr.nonce,
-        CryptoHash(in_tr.block_hash),
-    );
-
-    let original_actions: Vec<ActionOriginal> = in_tr
-        .actions
-        .iter()
-        .map(|action| {
-            let action = action.clone();
-            action.into()
-        })
-        .collect();
-    tr.actions = original_actions;
-
-    tr
+    TransactionOriginal::V1(near_primitives::transaction::TransactionV1 {
+        signer_id: AccountId::from_str(&in_tr.signer_id.as_str()).unwrap(),
+        public_key: PublicKey::ED25519(ED25519PublicKey(in_tr.public_key)),
+        nonce: in_tr.nonce,
+        receiver_id: AccountId::from_str(&in_tr.receiver_id.as_str()).unwrap(),
+        block_hash: CryptoHash(in_tr.block_hash),
+        actions: in_tr.actions.iter().cloned().map(Into::into).collect(),
+        priority_fee: 0,
+    })
 }
 
 use pyo3::types::PyBytes;
@@ -573,7 +596,7 @@ impl DelegateAction {
     #[pyo3(text_signature = "() -> bytes")]
     fn serialize(&self) -> PyResult<Py<PyBytes>> {
         let action: DelegateActionOriginal = self.clone().into();
-        let res = action.try_to_vec().unwrap().to_vec();
+        let res = borsh::to_vec(&action).unwrap();
         let py = unsafe { Python::assume_gil_acquired() };
         let pybytes = PyBytes::new(py, &res);
 
@@ -710,17 +733,21 @@ impl Transaction {
         let tr = get_orig_transaction(&self);
         let key = near_crypto::SecretKey::ED25519(ED25519SecretKey(secret_key));
         let signer = near_crypto::InMemorySigner::from_secret_key(
-            AccountId::from_str(&tr.signer_id.to_string()).unwrap(),
+            AccountId::from_str(&tr.signer_id().to_string()).unwrap(),
             key,
         );
-        let strx = tr.sign(&signer);
-        strx.try_to_vec().unwrap()
+        let signature = signer.sign(tr.get_hash_and_size().0.as_ref());
+        let signed_transaction = SignedTransactionOriginal::new(
+            signature,
+            tr
+        );
+        borsh::to_vec(&signed_transaction).unwrap()
     }
 
     #[pyo3(signature = ())]
     fn serialize(&self) -> Vec<u8> {
         let tr = get_orig_transaction(&self);
-        tr.try_to_vec().unwrap()
+        borsh::to_vec(&tr).unwrap()
     }
 
     #[staticmethod]
@@ -729,18 +756,18 @@ impl Transaction {
         let bytes = &mut bytes;
         let original_tx: TransactionOriginal =
             near_primitives::borsh::BorshDeserialize::deserialize(bytes).unwrap();
-        let public_key = match original_tx.public_key {
+        let public_key = match original_tx.public_key() {
             PublicKey::SECP256K1(_) => panic!("512 bit elliptic curve unsupported!"),
             PublicKey::ED25519(public_key) => public_key.0,
         };
 
         Self {
-            nonce: original_tx.nonce,
-            signer_id: original_tx.signer_id.into(),
+            nonce: original_tx.nonce(),
+            signer_id: original_tx.signer_id().to_string(),
             public_key,
-            receiver_id: original_tx.receiver_id.into(),
-            block_hash: original_tx.block_hash.0,
-            actions: original_tx.actions.into_iter().map(Action::from).collect(),
+            receiver_id: original_tx.receiver_id().to_string(),
+            block_hash: original_tx.block_hash().0,
+            actions: original_tx.actions().iter().cloned().map(Action::from).collect(),
         }
     }
 }
@@ -762,7 +789,10 @@ impl From<SignedTransaction> for SignedTransactionOriginal {
     fn from(value: SignedTransaction) -> Self {
         let transaction = get_orig_transaction(&value.transaction);
         let signature =
-            Signature::ED25519(ed25519_dalek::Signature::from_bytes(&value.signature).unwrap());
+            Signature::from_parts(
+                KeyType::ED25519,
+                &value.signature
+            ).unwrap();
 
         // TODO: hash & size are private, this is only way to create. fix
         SignedTransactionOriginal::new(signature, transaction)
@@ -776,7 +806,10 @@ impl SignedTransaction {
     fn new(signature: [u8; 64], transaction: Transaction) -> Self {
         let original_tx = get_orig_transaction(&transaction);
         let original_signed_tx = SignedTransactionOriginal::new(
-            Signature::ED25519(ed25519_dalek::Signature::from_bytes(&signature).unwrap()),
+            Signature::from_parts(
+                KeyType::ED25519,
+                &signature
+            ).unwrap(),
             original_tx,
         );
 
@@ -791,7 +824,7 @@ impl SignedTransaction {
     #[pyo3(signature = ())]
     fn serialize(&self) -> Vec<u8> {
         let original_signed_tx: SignedTransactionOriginal = self.clone().into();
-        original_signed_tx.try_to_vec().unwrap()
+        borsh::to_vec(&original_signed_tx).unwrap()
     }
 }
 
