@@ -1,6 +1,6 @@
 use std::hash::Hash;
 use std::str::FromStr;
-
+use borsh::BorshDeserialize;
 use derive_more::From;
 use derive_more::Into;
 use near_primitives_core::borsh::BorshSerialize;
@@ -20,6 +20,7 @@ use near_primitives::{
     },
     action::{
         DeployGlobalContractAction as DeployGlobalContractActionOriginal,
+        UseGlobalContractAction as UseGlobalContractActionOriginal,
         delegate::DelegateAction as DelegateActionOriginal,
         delegate::SignedDelegateAction as SignedDelegateActionOriginal,
     },
@@ -37,7 +38,6 @@ use near_primitives::{
 };
 
 use near_crypto::{PublicKey, Signature};
-use near_primitives::transaction::TransactionV0;
 
 pub type LogEntry = String;
 
@@ -173,6 +173,8 @@ pub enum Action {
     DeleteKey(DeleteKeyAction),
     DeleteAccount(DeleteAccountAction),
     Delegate(SignedDelegateAction),
+    DeployGlobalContract(DeployGlobalContractAction),
+    UseGlobalContract(UseGlobalContractAction),
 }
 
 impl From<Action> for ActionOriginal {
@@ -187,6 +189,8 @@ impl From<Action> for ActionOriginal {
             Action::DeleteKey(x) => ActionOriginal::DeleteKey(x.into()),
             Action::DeleteAccount(x) => ActionOriginal::DeleteAccount(x.into()),
             Action::Delegate(x) => ActionOriginal::Delegate(x.into()),
+            Action::DeployGlobalContract(x) => ActionOriginal::DeployGlobalContract(x.into()),
+            Action::UseGlobalContract(x) => ActionOriginal::UseGlobalContract(x.into()),
         }
     }
 }
@@ -203,7 +207,129 @@ impl From<ActionOriginal> for Action {
             ActionOriginal::DeleteKey(x) => Action::DeleteKey(x.into()),
             ActionOriginal::DeleteAccount(x) => Action::DeleteAccount(x.into()),
             ActionOriginal::Delegate(x) => Action::Delegate(x.into()),
+            ActionOriginal::DeployGlobalContract(x) => Action::DeployGlobalContract(x.into()),
+            ActionOriginal::UseGlobalContract(x) => Action::UseGlobalContract(x.into()),
         }
+    }
+}
+
+#[pyclass]
+#[derive(
+    BorshSerialize,
+    BorshDeserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    PartialEq,
+    Eq,
+    Clone,
+    Debug,
+)]
+#[repr(u8)]
+pub enum GlobalContractDeployMode {
+    /// Contract is deployed under its code hash.
+    /// Users will be able reference it by that hash.
+    /// This effectively makes the contract immutable.
+    CodeHash,
+    /// Contract is deployed under the owner account id.
+    /// Users will be able reference it by that account id.
+    /// This allows the owner to update the contract for all its users.
+    AccountId,
+}
+
+
+#[derive(
+    BorshSerialize,
+    BorshDeserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Hash,
+    PartialEq,
+    Eq,
+    Clone,
+    Debug,
+)]
+pub enum GlobalContractIdentifier {
+    CodeHash(CryptoHash),
+    AccountId(AccountId),
+}
+
+#[pyclass]
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct UseGlobalContractAction {
+    pub contract_identifier: GlobalContractIdentifier,
+}
+
+impl From<UseGlobalContractAction> for UseGlobalContractActionOriginal {
+    fn from(value: UseGlobalContractAction) -> Self {
+        Self {
+            contract_identifier: match value.contract_identifier {
+                GlobalContractIdentifier::CodeHash(hash) => near_primitives::action::GlobalContractIdentifier::CodeHash(hash),
+                GlobalContractIdentifier::AccountId(account_id) => near_primitives::action::GlobalContractIdentifier::AccountId(account_id),
+            },
+        }
+    }
+}
+
+impl From<UseGlobalContractAction> for Box<UseGlobalContractActionOriginal> {
+    fn from(value: UseGlobalContractAction) -> Self {
+        Box::new(value.into())
+    }
+}
+
+impl From<Box<UseGlobalContractActionOriginal>> for UseGlobalContractAction {
+    fn from(value: Box<UseGlobalContractActionOriginal>) -> Self {
+        Self {
+            contract_identifier: match value.contract_identifier {
+                near_primitives::action::GlobalContractIdentifier::CodeHash(hash) => GlobalContractIdentifier::CodeHash(hash),
+                near_primitives::action::GlobalContractIdentifier::AccountId(account_id) => GlobalContractIdentifier::AccountId(account_id),
+            },
+        }
+    }
+}
+
+
+#[pyclass]
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct DeployGlobalContractAction {
+    #[pyo3(get, set)]
+    pub code: Vec<u8>,
+    #[pyo3(get, set)]
+    pub deploy_mode: GlobalContractDeployMode,
+}
+
+impl From<DeployGlobalContractAction> for DeployGlobalContractActionOriginal {
+    fn from(value: DeployGlobalContractAction) -> Self {
+        Self {
+            code: value.code.into(),
+            deploy_mode: match value.deploy_mode {
+                GlobalContractDeployMode::CodeHash => near_primitives::action::GlobalContractDeployMode::CodeHash,
+                GlobalContractDeployMode::AccountId => near_primitives::action::GlobalContractDeployMode::AccountId,
+            },
+        }
+    }
+}
+
+impl From<DeployGlobalContractAction> for Box<DeployGlobalContractActionOriginal> {
+    fn from(value: DeployGlobalContractAction) -> Self {
+        Box::new(value.into())
+    }
+}
+
+impl From<DeployGlobalContractActionOriginal> for DeployGlobalContractAction {
+    fn from(value: DeployGlobalContractActionOriginal) -> Self {
+        Self {
+            code: value.code.to_vec(),
+            deploy_mode: match value.deploy_mode {
+                near_primitives::action::GlobalContractDeployMode::CodeHash => GlobalContractDeployMode::CodeHash,
+                near_primitives::action::GlobalContractDeployMode::AccountId => GlobalContractDeployMode::AccountId,
+            },
+        }
+    }
+}
+
+impl From<DeployGlobalContractActionOriginal> for Box<DeployGlobalContractAction> {
+    fn from(value: DeployGlobalContractActionOriginal) -> Self {
+        Box::new(value.into())
     }
 }
 
