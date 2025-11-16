@@ -7,7 +7,7 @@
 
 A wrapper over `py-near-primitives` rust lib for python. Using for [py-near](https://github.com/pvolnov/py-near).
 
-Latest supported version: `py-near-primitives = "0.2.5"`
+Latest supported version: `py-near-primitives = "0.2.12"`
 
 **Note:** This library uses Transaction V0 format (priority_fee is not supported).
 
