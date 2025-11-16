@@ -14,9 +14,7 @@ crate-type = ["cdylib", "rlib"]
 serde = "^1.0.136"
 serde_json = "^1.0.59"
 derive_more = "0.99.17"
-pyo3 = { version = "0.18.0", features = ["macros", "extension-module", "abi3-py37"] }
-solders-traits = "0.14.1"
-solders-macros = "0.14.1"
+pyo3 = { version = "0.27", features = ["macros", "extension-module", "abi3-py37", "experimental-inspect"] }
 borsh = "1.5.7"
 near-crypto = "0.33.0"
 near-primitives = { version = "0.33.0", features = ["nightly"] }

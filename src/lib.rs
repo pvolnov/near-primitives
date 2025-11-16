@@ -6,8 +6,6 @@ use derive_more::Into;
 use near_primitives_core::borsh::BorshSerialize;
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
-use solders_macros::pyhash;
-use solders_macros::EnumIntoPy;
 
 use near_crypto::{ED25519PublicKey, KeyType};
 use near_crypto::ED25519SecretKey;
@@ -75,13 +73,10 @@ pub struct FunctionCallPermission {
     pub method_names: Vec<String>,
 }
 
-use solders_traits::PyHash;
-impl PyHash for FunctionCallPermission {}
-
-#[pyhash]
 #[pymethods]
 impl FunctionCallPermission {
     #[new]
+    #[pyo3(signature = (receiver_id: "str", method_names: "list[str]", allowance: "int | None" = None))]
     pub fn new(receiver_id: String, method_names: Vec<String>, allowance: Option<Balance>) -> Self {
         FunctionCallPermission {
             allowance,
@@ -96,7 +91,7 @@ pub enum AccessKeyPermissionFieldless {
     FullAccess,
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug, FromPyObject, EnumIntoPy)]
+#[derive(PartialEq, Eq, Hash, Clone, Debug, FromPyObject)]
 pub enum AccessKeyPermission {
     FunctionCall(FunctionCallPermission),
     Fieldless(AccessKeyPermissionFieldless),
@@ -137,7 +132,7 @@ impl From<AccessKeyPermissionOriginal> for AccessKeyPermission {
 #[pymethods]
 impl AccessKey {
     #[new]
-    #[pyo3(signature = (nonce, permission))]
+    #[pyo3(signature = (nonce: "int", permission: "AccessKeyPermission"))]
     fn new(nonce: u64, permission: AccessKeyPermission) -> AccessKey {
         AccessKey {
             nonce,
@@ -219,24 +214,53 @@ impl From<ActionOriginal> for Action {
     BorshDeserialize,
     serde::Serialize,
     serde::Deserialize,
+    Hash,
     PartialEq,
     Eq,
     Clone,
     Debug,
 )]
-#[repr(u8)]
-pub enum GlobalContractDeployMode {
-    /// Contract is deployed under its code hash.
-    /// Users will be able reference it by that hash.
-    /// This effectively makes the contract immutable.
-    CodeHash,
-    /// Contract is deployed under the owner account id.
-    /// Users will be able reference it by that account id.
-    /// This allows the owner to update the contract for all its users.
-    AccountId,
+pub struct GlobalContractIdentifierCodeHash {
+    #[pyo3(get, set)]
+    pub hash: [u8; 32],
 }
 
+#[pymethods]
+impl GlobalContractIdentifierCodeHash {
+    #[new]
+    #[pyo3(signature = (hash: "bytes"))]
+    fn new(hash: [u8; 32]) -> Self {
+        Self { hash }
+    }
+}
 
+#[pyclass]
+#[derive(
+    BorshSerialize,
+    BorshDeserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Hash,
+    PartialEq,
+    Eq,
+    Clone,
+    Debug,
+)]
+pub struct GlobalContractIdentifierAccountId {
+    #[pyo3(get, set)]
+    pub account_id: String,
+}
+
+#[pymethods]
+impl GlobalContractIdentifierAccountId {
+    #[new]
+    #[pyo3(signature = (account_id: "str"))]
+    fn new(account_id: String) -> Self {
+        Self { account_id }
+    }
+}
+
+#[pyclass]
 #[derive(
     BorshSerialize,
     BorshDeserialize,
@@ -249,23 +273,51 @@ pub enum GlobalContractDeployMode {
     Debug,
 )]
 pub enum GlobalContractIdentifier {
-    CodeHash(CryptoHash),
-    AccountId(AccountId),
+    CodeHash(GlobalContractIdentifierCodeHash),
+    AccountId(GlobalContractIdentifierAccountId),
+}
+
+
+impl From<GlobalContractIdentifier> for near_primitives::action::GlobalContractIdentifier {
+    fn from(value: GlobalContractIdentifier) -> Self {
+        match value {
+            GlobalContractIdentifier::CodeHash(wrapper) => {
+                Self::CodeHash(CryptoHash(wrapper.hash))
+            }
+            GlobalContractIdentifier::AccountId(wrapper) => {
+                Self::AccountId(AccountId::from_str(&wrapper.account_id).unwrap())
+            }
+        }
+    }
+}
+
+impl From<near_primitives::action::GlobalContractIdentifier> for GlobalContractIdentifier {
+    fn from(value: near_primitives::action::GlobalContractIdentifier) -> Self {
+        match value {
+            near_primitives::action::GlobalContractIdentifier::CodeHash(hash) => {
+                Self::CodeHash(GlobalContractIdentifierCodeHash {
+                    hash: hash.0,
+                })
+            }
+            near_primitives::action::GlobalContractIdentifier::AccountId(account_id) => {
+                Self::AccountId(GlobalContractIdentifierAccountId {
+                    account_id: account_id.to_string(),
+                })
+            }
+        }
+    }
 }
 
 #[pyclass]
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct UseGlobalContractAction {
-    pub contract_identifier: GlobalContractIdentifier,
+    contract_identifier: GlobalContractIdentifier,
 }
 
 impl From<UseGlobalContractAction> for UseGlobalContractActionOriginal {
     fn from(value: UseGlobalContractAction) -> Self {
         Self {
-            contract_identifier: match value.contract_identifier {
-                GlobalContractIdentifier::CodeHash(hash) => near_primitives::action::GlobalContractIdentifier::CodeHash(hash),
-                GlobalContractIdentifier::AccountId(account_id) => near_primitives::action::GlobalContractIdentifier::AccountId(account_id),
-            },
+            contract_identifier: value.contract_identifier.into(),
         }
     }
 }
@@ -279,10 +331,42 @@ impl From<UseGlobalContractAction> for Box<UseGlobalContractActionOriginal> {
 impl From<Box<UseGlobalContractActionOriginal>> for UseGlobalContractAction {
     fn from(value: Box<UseGlobalContractActionOriginal>) -> Self {
         Self {
-            contract_identifier: match value.contract_identifier {
-                near_primitives::action::GlobalContractIdentifier::CodeHash(hash) => GlobalContractIdentifier::CodeHash(hash),
-                near_primitives::action::GlobalContractIdentifier::AccountId(account_id) => GlobalContractIdentifier::AccountId(account_id),
-            },
+            contract_identifier: value.contract_identifier.into(),
+        }
+    }
+}
+
+#[pymethods]
+impl UseGlobalContractAction {
+    #[new]
+    #[pyo3(signature = (account_id: "String"))]
+    fn new(account_id: String) -> UseGlobalContractAction {
+        UseGlobalContractAction {
+            contract_identifier: GlobalContractIdentifier::AccountId(GlobalContractIdentifierAccountId {
+                account_id: account_id,
+            }),
+        }
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (code_hash: "bytes"))]
+    fn from_code_hash(code_hash: Vec<u8>) -> UseGlobalContractAction {
+        let mut hash = [0; 32];
+        hash.copy_from_slice(&code_hash);
+        UseGlobalContractAction {
+            contract_identifier: GlobalContractIdentifier::CodeHash(GlobalContractIdentifierCodeHash {
+                hash: hash,
+            }),
+        }
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (account_id: "String"))]
+    fn from_account_id(account_id: String) -> UseGlobalContractAction {
+        UseGlobalContractAction {
+            contract_identifier: GlobalContractIdentifier::AccountId(GlobalContractIdentifierAccountId {
+                account_id: account_id,
+            }),
         }
     }
 }
@@ -293,18 +377,14 @@ impl From<Box<UseGlobalContractActionOriginal>> for UseGlobalContractAction {
 pub struct DeployGlobalContractAction {
     #[pyo3(get, set)]
     pub code: Vec<u8>,
-    #[pyo3(get, set)]
-    pub deploy_mode: GlobalContractDeployMode,
+    deploy_mode: near_primitives::action::GlobalContractDeployMode,
 }
 
 impl From<DeployGlobalContractAction> for DeployGlobalContractActionOriginal {
     fn from(value: DeployGlobalContractAction) -> Self {
         Self {
             code: value.code.into(),
-            deploy_mode: match value.deploy_mode {
-                GlobalContractDeployMode::CodeHash => near_primitives::action::GlobalContractDeployMode::CodeHash,
-                GlobalContractDeployMode::AccountId => near_primitives::action::GlobalContractDeployMode::AccountId,
-            },
+            deploy_mode: value.deploy_mode,
         }
     }
 }
@@ -319,10 +399,7 @@ impl From<DeployGlobalContractActionOriginal> for DeployGlobalContractAction {
     fn from(value: DeployGlobalContractActionOriginal) -> Self {
         Self {
             code: value.code.to_vec(),
-            deploy_mode: match value.deploy_mode {
-                near_primitives::action::GlobalContractDeployMode::CodeHash => GlobalContractDeployMode::CodeHash,
-                near_primitives::action::GlobalContractDeployMode::AccountId => GlobalContractDeployMode::AccountId,
-            },
+            deploy_mode: value.deploy_mode,
         }
     }
 }
@@ -330,6 +407,27 @@ impl From<DeployGlobalContractActionOriginal> for DeployGlobalContractAction {
 impl From<DeployGlobalContractActionOriginal> for Box<DeployGlobalContractAction> {
     fn from(value: DeployGlobalContractActionOriginal) -> Self {
         Box::new(value.into())
+    }
+}
+
+#[pymethods]
+impl DeployGlobalContractAction {
+    #[staticmethod]
+    #[pyo3(signature = (code: "bytes"))]
+    fn from_code_hash(code: Vec<u8>) -> DeployGlobalContractAction {
+        DeployGlobalContractAction {
+            code,
+            deploy_mode: near_primitives::action::GlobalContractDeployMode::CodeHash,
+        }
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (code: "bytes"))]
+    fn from_account_id(code: Vec<u8>) -> DeployGlobalContractAction {
+        DeployGlobalContractAction {
+            code,
+            deploy_mode: near_primitives::action::GlobalContractDeployMode::AccountId,
+        }
     }
 }
 
@@ -669,7 +767,7 @@ impl From<DeleteAccountActionOriginal> for DeleteAccountAction {
 #[pymethods]
 impl SignedDelegateAction {
     #[new]
-    #[pyo3(signature = (delegate_action, signature))]
+    #[pyo3(signature = (delegate_action: "DelegateAction", signature: "bytes"))]
     fn new(delegate_action: DelegateAction, signature: [u8; 64]) -> SignedDelegateAction {
         SignedDelegateAction {
             delegate_action: delegate_action,
@@ -679,14 +777,13 @@ impl SignedDelegateAction {
 }
 
 fn get_orig_transaction(in_tr: &Transaction) -> TransactionOriginal {
-    TransactionOriginal::V1(near_primitives::transaction::TransactionV1 {
+    TransactionOriginal::V0(near_primitives::transaction::TransactionV0 {
         signer_id: AccountId::from_str(&in_tr.signer_id.as_str()).unwrap(),
         public_key: PublicKey::ED25519(ED25519PublicKey(in_tr.public_key)),
         nonce: in_tr.nonce,
         receiver_id: AccountId::from_str(&in_tr.receiver_id.as_str()).unwrap(),
         block_hash: CryptoHash(in_tr.block_hash),
         actions: in_tr.actions.iter().cloned().map(Into::into).collect(),
-        priority_fee: 0,
     })
 }
 
@@ -695,7 +792,7 @@ use pyo3::types::PyBytes;
 #[pymethods]
 impl DelegateAction {
     #[new]
-    #[pyo3(signature = (sender_id, receiver_id, actions, nonce, max_block_height, public_key))]
+    #[pyo3(signature = (sender_id: "str", receiver_id: "str", actions: "list[Action]", nonce: "int", max_block_height: "int", public_key: "bytes"))]
     pub fn new(
         sender_id: String,
         receiver_id: String,
@@ -714,23 +811,24 @@ impl DelegateAction {
         }
     }
 
+    #[pyo3(signature = () -> "bytes")]
     fn get_nep461_hash(&self) -> [u8; 32] {
         let action: DelegateActionOriginal = self.clone().into();
         *action.get_nep461_hash().as_bytes()
     }
 
-    #[pyo3(text_signature = "() -> bytes")]
+    #[pyo3(signature = () -> "bytes")]
     fn serialize(&self) -> PyResult<Py<PyBytes>> {
         let action: DelegateActionOriginal = self.clone().into();
         let res = borsh::to_vec(&action).unwrap();
-        let py = unsafe { Python::assume_gil_acquired() };
+        let py = unsafe { Python::assume_attached() };
         let pybytes = PyBytes::new(py, &res);
 
         Ok(pybytes.into())
     }
 
     #[staticmethod]
-    #[pyo3(signature = (bytes))]
+    #[pyo3(signature = (bytes: "bytes") -> "str")]
     fn bytes_to_json(mut bytes: &[u8]) -> String {
         let bytes_mut: &mut &[u8] = &mut bytes;
         let action: DelegateActionOriginal =
@@ -743,6 +841,7 @@ impl DelegateAction {
 #[pymethods]
 impl CreateAccountAction {
     #[new]
+    #[pyo3(signature = ())]
     fn new() -> CreateAccountAction {
         CreateAccountAction {}
     }
@@ -751,7 +850,7 @@ impl CreateAccountAction {
 #[pymethods]
 impl DeployContractAction {
     #[new]
-    #[pyo3(signature = (code))]
+    #[pyo3(signature = (code: "bytes"))]
     fn new(code: Vec<u8>) -> DeployContractAction {
         DeployContractAction { code }
     }
@@ -760,7 +859,7 @@ impl DeployContractAction {
 #[pymethods]
 impl FunctionCallAction {
     #[new]
-    #[pyo3(signature = (method_name, args, gas = 0, deposit = 0))]
+    #[pyo3(signature = (method_name: "str", args: "bytes", gas: "int" = 0, deposit: "int" = 0))]
     fn new(method_name: &str, args: Vec<u8>, gas: u64, deposit: Balance) -> FunctionCallAction {
         FunctionCallAction {
             method_name: method_name.to_string(),
@@ -774,7 +873,7 @@ impl FunctionCallAction {
 #[pymethods]
 impl TransferAction {
     #[new]
-    #[pyo3(signature = (deposit))]
+    #[pyo3(signature = (deposit: "int"))]
     fn new(deposit: u128) -> TransferAction {
         TransferAction { deposit }
     }
@@ -783,7 +882,7 @@ impl TransferAction {
 #[pymethods]
 impl StakeAction {
     #[new]
-    #[pyo3(signature = (stake, public_key))]
+    #[pyo3(signature = (stake: "int", public_key: "bytes"))]
     fn new(stake: u128, public_key: [u8; 32]) -> StakeAction {
         StakeAction {
             stake,
@@ -795,7 +894,7 @@ impl StakeAction {
 #[pymethods]
 impl AddKeyAction {
     #[new]
-    #[pyo3(signature = (public_key, access_key))]
+    #[pyo3(signature = (public_key: "bytes", access_key: "AccessKey"))]
     fn new(public_key: [u8; 32], access_key: AccessKey) -> AddKeyAction {
         AddKeyAction {
             public_key: public_key,
@@ -807,7 +906,7 @@ impl AddKeyAction {
 #[pymethods]
 impl DeleteKeyAction {
     #[new]
-    #[pyo3(signature = (public_key))]
+    #[pyo3(signature = (public_key: "bytes"))]
     fn new(public_key: [u8; 32]) -> DeleteKeyAction {
         DeleteKeyAction {
             public_key: public_key,
@@ -818,7 +917,7 @@ impl DeleteKeyAction {
 #[pymethods]
 impl DeleteAccountAction {
     #[new]
-    #[pyo3(signature = (beneficiary_id))]
+    #[pyo3(signature = (beneficiary_id: "str"))]
     fn new(beneficiary_id: &str) -> DeleteAccountAction {
         DeleteAccountAction {
             beneficiary_id: beneficiary_id.to_string(),
@@ -829,7 +928,7 @@ impl DeleteAccountAction {
 #[pymethods]
 impl Transaction {
     #[new]
-    #[pyo3(signature = (signer_id, public_key, nonce, receiver_id, block_hash, actions))]
+    #[pyo3(signature = (signer_id: "str", public_key: "bytes", nonce: "int", receiver_id: "str", block_hash: "bytes", actions: "list[Action]"))]
     fn new(
         signer_id: &str,
         public_key: [u8; 32],
@@ -848,13 +947,13 @@ impl Transaction {
         }
     }
 
-    #[pyo3(signature = ())]
+    #[pyo3(signature = () -> "bytes")]
     fn get_hash(&self) -> Vec<u8> {
         let tr = get_orig_transaction(&self);
         return tr.get_hash_and_size().0.as_bytes().to_vec();
     }
 
-    #[pyo3(signature = (secret_key))]
+    #[pyo3(signature = (secret_key: "bytes") -> "bytes")]
     fn to_vec(&self, secret_key: [u8; 64]) -> Vec<u8> {
         let tr = get_orig_transaction(&self);
         let key = near_crypto::SecretKey::ED25519(ED25519SecretKey(secret_key));
@@ -870,30 +969,37 @@ impl Transaction {
         borsh::to_vec(&signed_transaction).unwrap()
     }
 
-    #[pyo3(signature = ())]
+    #[pyo3(signature = () -> "bytes")]
     fn serialize(&self) -> Vec<u8> {
         let tr = get_orig_transaction(&self);
         borsh::to_vec(&tr).unwrap()
     }
 
     #[staticmethod]
-    #[pyo3(signature = (bytes))]
+    #[pyo3(signature = (bytes: "bytes") -> "Transaction")]
     fn deserialize(mut bytes: &[u8]) -> Self {
         let bytes = &mut bytes;
         let original_tx: TransactionOriginal =
             near_primitives::borsh::BorshDeserialize::deserialize(bytes).unwrap();
-        let public_key = match original_tx.public_key() {
+        
+        // Ensure we only work with V0 transactions
+        let tx_v0 = match original_tx {
+            TransactionOriginal::V0(tx) => tx,
+            _ => panic!("Only Transaction::V0 is supported"),
+        };
+        
+        let public_key = match tx_v0.public_key {
             PublicKey::SECP256K1(_) => panic!("512 bit elliptic curve unsupported!"),
             PublicKey::ED25519(public_key) => public_key.0,
         };
 
         Self {
-            nonce: original_tx.nonce(),
-            signer_id: original_tx.signer_id().to_string(),
+            nonce: tx_v0.nonce,
+            signer_id: tx_v0.signer_id.to_string(),
             public_key,
-            receiver_id: original_tx.receiver_id().to_string(),
-            block_hash: original_tx.block_hash().0,
-            actions: original_tx.actions().iter().cloned().map(Action::from).collect(),
+            receiver_id: tx_v0.receiver_id.to_string(),
+            block_hash: tx_v0.block_hash.0,
+            actions: tx_v0.actions.iter().cloned().map(Action::from).collect(),
         }
     }
 }
@@ -914,6 +1020,11 @@ struct SignedTransaction {
 impl From<SignedTransaction> for SignedTransactionOriginal {
     fn from(value: SignedTransaction) -> Self {
         let transaction = get_orig_transaction(&value.transaction);
+        // Ensure transaction is V0
+        let transaction_v0 = match transaction {
+            TransactionOriginal::V0(tx) => tx,
+            _ => panic!("Only Transaction::V0 is supported"),
+        };
         let signature =
             Signature::from_parts(
                 KeyType::ED25519,
@@ -921,22 +1032,27 @@ impl From<SignedTransaction> for SignedTransactionOriginal {
             ).unwrap();
 
         // TODO: hash & size are private, this is only way to create. fix
-        SignedTransactionOriginal::new(signature, transaction)
+        SignedTransactionOriginal::new(signature, TransactionOriginal::V0(transaction_v0))
     }
 }
 
 #[pymethods]
 impl SignedTransaction {
     #[new]
-    #[pyo3(signature = (signature, transaction))]
+    #[pyo3(signature = (signature: "bytes", transaction: "Transaction"))]
     fn new(signature: [u8; 64], transaction: Transaction) -> Self {
         let original_tx = get_orig_transaction(&transaction);
+        // Ensure transaction is V0
+        let transaction_v0 = match original_tx {
+            TransactionOriginal::V0(tx) => tx,
+            _ => panic!("Only Transaction::V0 is supported"),
+        };
         let original_signed_tx = SignedTransactionOriginal::new(
             Signature::from_parts(
                 KeyType::ED25519,
                 &signature
             ).unwrap(),
-            original_tx,
+            TransactionOriginal::V0(transaction_v0),
         );
 
         Self {
@@ -947,7 +1063,7 @@ impl SignedTransaction {
         }
     }
 
-    #[pyo3(signature = ())]
+    #[pyo3(signature = () -> "bytes")]
     fn serialize(&self) -> Vec<u8> {
         let original_signed_tx: SignedTransactionOriginal = self.clone().into();
         borsh::to_vec(&original_signed_tx).unwrap()
@@ -955,7 +1071,7 @@ impl SignedTransaction {
 }
 
 #[pymodule]
-fn py_near_primitives(_py: Python, m: &PyModule) -> PyResult<()> {
+fn py_near_primitives(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Transaction>()?;
 
     m.add_class::<DeleteAccountAction>()?;
@@ -972,5 +1088,10 @@ fn py_near_primitives(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<AccessKeyPermissionFieldless>()?;
     m.add_class::<FunctionCallPermission>()?;
     m.add_class::<SignedTransaction>()?;
+    m.add_class::<UseGlobalContractAction>()?;
+    m.add_class::<DeployGlobalContractAction>()?;
+    m.add_class::<GlobalContractIdentifierCodeHash>()?;
+    m.add_class::<GlobalContractIdentifierAccountId>()?;
+    m.add_class::<GlobalContractIdentifier>()?;
     Ok(())
 }
